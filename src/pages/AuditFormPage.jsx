@@ -24,7 +24,6 @@ function getAnswer(response) {
 
 function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPhotoRemove, auditId, canEdit }) {
   const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef()
   const toast = useToast()
 
   const answer = getAnswer(response)
@@ -39,7 +38,8 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
 
   const handlePhotoCapture = async (e) => {
     const file = e.target.files?.[0]
-    if (!file || !response?.id) return
+    if (!file) return
+    if (!response?.id) { toast.error('Save your answers first, then add a photo'); return }
     setUploading(true)
     try {
       const data = await api.uploadPhoto(auditId, response.id, file)
@@ -108,29 +108,23 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
         </button>
       </div>
 
-      {/* Score display */}
-      {answer && !isNA && (
-        <p className={`mt-2 text-xs font-medium ${answer === 'yes' ? 'text-green-400' : 'text-red-400'}`}>
-          {answer === 'yes' ? `+${point.max_score} pts` : '0 pts'}
-        </p>
-      )}
+      {/* Step 2: score + comment + photo — only after Yes or No */}
+      {(answer === 'yes' || answer === 'no') && (
+        <>
+          <p className={`mt-2 text-xs font-medium ${answer === 'yes' ? 'text-green-400' : 'text-red-400'}`}>
+            {answer === 'yes' ? `+${point.max_score} pts` : '0 pts'}
+          </p>
 
-      {/* Comments — only when yes or no */}
-      {!isNA && (
-        <textarea
-          value={comments}
-          onChange={e => onResponseChange(point.id, { comments: e.target.value })}
-          disabled={!canEdit}
-          placeholder="Comments (optional)"
-          rows={2}
-          className="mt-3 w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-amber-500 resize-none disabled:opacity-50"
-        />
-      )}
+          <textarea
+            value={comments}
+            onChange={e => onResponseChange(point.id, { comments: e.target.value })}
+            disabled={!canEdit}
+            placeholder="Comments (optional)"
+            rows={2}
+            className="mt-3 w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-amber-500 resize-none disabled:opacity-50"
+          />
 
-      {/* Photos — show when not N/A and response exists */}
-      {!isNA && response && (
-        <div className="mt-3">
-          <div className="flex flex-wrap gap-2 items-start">
+          <div className="mt-3 flex flex-wrap gap-2 items-start">
             {photos.map(photo => (
               <div key={photo.id} className="relative group">
                 <img
@@ -150,27 +144,20 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
             ))}
 
             {canEdit && (
-              <>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || !response?.id}
-                  className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-gray-500 hover:border-amber-500 hover:text-amber-400 active:scale-95 transition-all disabled:opacity-40"
-                >
-                  {uploading ? <Spinner size={5} /> : <Camera size={22} />}
-                  {!uploading && <span className="text-xs mt-1">Photo</span>}
-                </button>
+              <label className={`w-20 h-20 rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-gray-500 hover:border-amber-500 hover:text-amber-400 active:scale-95 transition-all cursor-pointer ${uploading ? 'opacity-40 pointer-events-none' : ''}`}>
+                {uploading ? <Spinner size={5} /> : <Camera size={22} />}
+                {!uploading && <span className="text-xs mt-1">Photo</span>}
                 <input
-                  ref={fileInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
-                  className="hidden"
+                  className="sr-only"
                   onChange={handlePhotoCapture}
+                  disabled={uploading}
                 />
-              </>
+              </label>
             )}
           </div>
-        </div>
+        </>
       )}
     </div>
   )
@@ -251,41 +238,44 @@ export default function AuditFormPage() {
   // Keep responsesRef in sync for use in beforeunload
   useEffect(() => { responsesRef.current = responses }, [responses])
 
-  useEffect(() => {
-    api.getAudit(auditId)
-      .then(data => {
-        const a = data.audit
-        setAudit(a)
-        setSections(a.sections || [])
+  const loadAudit = useCallback(async (mergeLocal = false) => {
+    const data = await api.getAudit(auditId)
+    const a = data.audit
+    setAudit(a)
+    setSections(a.sections || [])
 
-        const rMap = {}
-        const pMap = {}
-        for (const s of a.sections || []) {
-          for (const p of s.qa_form_points || []) {
-            if (p.response) {
-              rMap[p.id] = p.response
-              pMap[p.response.id] = p.photos || []
-            }
-          }
+    const rMap = {}
+    const pMap = {}
+    for (const s of a.sections || []) {
+      for (const p of s.qa_form_points || []) {
+        if (p.response) {
+          rMap[p.id] = p.response
+          pMap[p.response.id] = p.photos || []
         }
+      }
+    }
 
-        // Merge localStorage over server data (handles back/reload mid-edit)
-        try {
-          const saved = localStorage.getItem(lsKey(auditId))
-          if (saved) {
-            const local = JSON.parse(saved)
-            for (const [pointId, changes] of Object.entries(local)) {
-              if (rMap[pointId]) rMap[pointId] = { ...rMap[pointId], ...changes }
-            }
-            // Mark merged local changes as dirty so they get flushed to server
-            dirtyRef.current = local
-            setSaveState('dirty')
+    if (mergeLocal) {
+      // Merge localStorage over server data (handles back/reload mid-edit)
+      try {
+        const saved = localStorage.getItem(lsKey(auditId))
+        if (saved) {
+          const local = JSON.parse(saved)
+          for (const [pointId, changes] of Object.entries(local)) {
+            if (rMap[pointId]) rMap[pointId] = { ...rMap[pointId], ...changes }
           }
-        } catch {}
+          dirtyRef.current = local
+          setSaveState('dirty')
+        }
+      } catch {}
+    }
 
-        setResponses(rMap)
-        setPhotos(pMap)
-      })
+    setResponses(rMap)
+    setPhotos(pMap)
+  }, [auditId])
+
+  useEffect(() => {
+    loadAudit(true)
       .catch(e => toast.error(e.message))
       .finally(() => setLoading(false))
   }, [auditId])
@@ -381,9 +371,11 @@ export default function AuditFormPage() {
     clearTimeout(saveTimerRef.current)
     await flushSave({ ...dirtyRef.current })
     try {
-      const data = await api.submitAudit(auditId)
-      setAudit(data.audit)
+      await api.submitAudit(auditId)
       localStorage.removeItem(lsKey(auditId))
+      dirtyRef.current = {}
+      // Reload full audit from server so scores + responses reflect actual DB state
+      await loadAudit(false)
       toast.success('Audit submitted for review')
       setShowSubmit(false)
     } catch (err) {
@@ -396,8 +388,8 @@ export default function AuditFormPage() {
   const handleApprove = async () => {
     setActionLoading(true)
     try {
-      const data = await api.approveAudit(auditId)
-      setAudit(data.audit)
+      await api.approveAudit(auditId)
+      await loadAudit(false)
       toast.success('Audit approved and pushed to KPI system')
     } catch (err) {
       toast.error(err.message)
