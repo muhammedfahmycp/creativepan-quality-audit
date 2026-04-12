@@ -17,11 +17,12 @@ import FormDesignerPage from './pages/settings/FormDesignerPage'
 import BranchesPage from './pages/settings/BranchesPage'
 import UsersPage from './pages/settings/UsersPage'
 
-function ProtectedRoute({ children, roles }) {
-  const { user, loading } = useAuth()
+function ProtectedRoute({ children, need }) {
+  const { user, loading, isQualityManager, isAuditor } = useAuth()
   if (loading) return <div className="flex justify-center items-center min-h-screen"><Spinner size={8} /></div>
   if (!user) return <Navigate to="/login" replace />
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />
+  if (need === 'quality_manager' && !isQualityManager) return <Navigate to="/" replace />
+  if (need === 'auditor' && !isAuditor) return <Navigate to="/" replace />
   return children
 }
 
@@ -44,7 +45,7 @@ function AppRoutes() {
         <Route
           path="history"
           element={
-            <ProtectedRoute roles={['admin', 'quality_manager', 'auditor']}>
+            <ProtectedRoute need="auditor">
               <AuditHistoryPage />
             </ProtectedRoute>
           }
@@ -60,7 +61,7 @@ function AppRoutes() {
         <Route
           path="settings"
           element={
-            <ProtectedRoute roles={['admin', 'quality_manager']}>
+            <ProtectedRoute need="quality_manager">
               <SettingsPage />
             </ProtectedRoute>
           }
@@ -68,7 +69,7 @@ function AppRoutes() {
         <Route
           path="settings/forms/:brandId"
           element={
-            <ProtectedRoute roles={['admin', 'quality_manager']}>
+            <ProtectedRoute need="quality_manager">
               <FormDesignerPage />
             </ProtectedRoute>
           }
@@ -76,7 +77,7 @@ function AppRoutes() {
         <Route
           path="settings/branches"
           element={
-            <ProtectedRoute roles={['admin', 'quality_manager']}>
+            <ProtectedRoute need="quality_manager">
               <BranchesPage />
             </ProtectedRoute>
           }
@@ -84,7 +85,7 @@ function AppRoutes() {
         <Route
           path="settings/users"
           element={
-            <ProtectedRoute roles={['admin', 'quality_manager']}>
+            <ProtectedRoute need="quality_manager">
               <UsersPage />
             </ProtectedRoute>
           }

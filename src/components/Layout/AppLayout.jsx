@@ -65,7 +65,7 @@ export default function AppLayout() {
         </div>
         <div className="mt-auto px-4 py-4 border-t border-gray-800">
           <div className="text-xs text-gray-500 mb-1">{user?.name}</div>
-          <div className="text-xs text-gray-600">{user?.role?.replace('_', ' ')}</div>
+          <div className="text-xs text-gray-600">{user?.qa_role?.replace('_', ' ') || user?.platform_role?.replace('_', ' ')}</div>
           <button onClick={logout} className="mt-3 flex items-center gap-2 text-xs text-gray-500 hover:text-white transition-colors">
             <LogOut size={14} /> Sign out
           </button>
