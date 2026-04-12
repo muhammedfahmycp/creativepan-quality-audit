@@ -138,16 +138,16 @@ class ApiClient {
     return this.request(`/api/quality/branch-managers/${id}`, { method: 'DELETE' })
   }
 
-  // ── Users ──
-  async getUsers(params = {}) {
-    const q = new URLSearchParams(params).toString()
-    return this.request(`/api/users${q ? `?${q}` : ''}`)
+  // ── QA Users ──
+  async getQAUsers() { return this.request('/api/quality/users') }
+  async createQAUser(data) {
+    return this.request('/api/quality/users', { method: 'POST', body: JSON.stringify(data) })
   }
-  async createUser(data) {
-    return this.request('/api/users', { method: 'POST', body: JSON.stringify(data) })
+  async updateQAUserRole(userId, role) {
+    return this.request(`/api/quality/users/${userId}/role`, { method: 'PUT', body: JSON.stringify({ role }) })
   }
-  async updateUser(id, data) {
-    return this.request(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+  async removeQAUser(userId) {
+    return this.request(`/api/quality/users/${userId}`, { method: 'DELETE' })
   }
 
   // ── Export ──
