@@ -39,7 +39,6 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
   const handlePhotoCapture = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!response?.id) { toast.error('Save your answers first, then add a photo'); return }
     setUploading(true)
     try {
       const data = await api.uploadPhoto(auditId, response.id, file)
@@ -297,10 +296,23 @@ export default function AuditFormPage() {
         point_id: pointId,
         ...changes,
       }))
-      await api.saveAudit(auditId, payload)
+      const result = await api.saveAudit(auditId, payload)
       dirtyRef.current = {}
       localStorage.removeItem(lsKey(auditId))
       setSaveState('saved')
+      // Inject server-assigned IDs into local response state
+      // (needed when a point had no pre-created response and was just upserted)
+      if (result?.responses?.length) {
+        setResponses(prev => {
+          const updated = { ...prev }
+          for (const r of result.responses) {
+            if (updated[r.point_id] && !updated[r.point_id].id) {
+              updated[r.point_id] = { ...updated[r.point_id], id: r.id }
+            }
+          }
+          return updated
+        })
+      }
     } catch (err) {
       setSaveState('dirty')
       toast.error('Autosave failed — changes kept locally')
