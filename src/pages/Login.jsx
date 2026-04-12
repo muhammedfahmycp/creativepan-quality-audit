@@ -14,7 +14,13 @@ export default function Login() {
   const handleSuccess = async (credentialResponse) => {
     setLoading(true)
     try {
-      await login(credentialResponse.credential)
+      const data = await login(credentialResponse.credential)
+      // Only quality managers, quality auditors, and platform admins can use this app
+      const u = data.user
+      const allowed = u.platform_role === 'admin' || !!u.qa_role
+      if (!allowed) {
+        throw new Error('This portal is for quality team members only. Contact your quality manager.')
+      }
       navigate('/')
     } catch (err) {
       toast.error(err.message || 'Login failed')

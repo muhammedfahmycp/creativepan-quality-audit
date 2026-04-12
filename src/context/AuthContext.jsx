@@ -33,13 +33,23 @@ export function AuthProvider({ children }) {
     window.location.href = '/login'
   }
 
-  const isAdmin         = user?.role === 'admin'
-  const isQualityManager = ['admin', 'quality_manager'].includes(user?.role)
-  const isAuditor       = ['admin', 'quality_manager', 'auditor'].includes(user?.role)
-  const isBranchManager = user?.role === 'branch_manager'
+  // Role helpers — derived from new unified role structure
+  // platform_role: 'admin' | 'top_management' | 'it_team' | null
+  // qa_role:       'quality_manager' | 'quality_auditor' | null
+
+  const isAdmin          = user?.platform_role === 'admin'
+  const isQualityManager = user?.platform_role === 'admin' || user?.qa_role === 'quality_manager'
+  const isAuditor        = user?.platform_role === 'admin' || !!user?.qa_role
+  const isBranchManager  = !!user?.branch   // branch-email login
+
+  // Gate: only QA system users (+ platform admin) can use this app
+  const hasQualityAccess = isAdmin || !!user?.qa_role
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAdmin, isQualityManager, isAuditor, isBranchManager, checkAuth }}>
+    <AuthContext.Provider value={{
+      user, loading, login, logout, checkAuth,
+      isAdmin, isQualityManager, isAuditor, isBranchManager, hasQualityAccess,
+    }}>
       {children}
     </AuthContext.Provider>
   )
