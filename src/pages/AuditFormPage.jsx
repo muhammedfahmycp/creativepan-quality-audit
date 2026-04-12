@@ -2,11 +2,23 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Camera, Trash2, Send, ChevronDown, ChevronUp, AlertTriangle, Download, CheckCircle, X } from 'lucide-react'
 import api from '../utils/api'
+import Modal from '../components/ui/Modal'
 import StatusBadge from '../components/ui/StatusBadge'
 import Spinner from '../components/ui/Spinner'
 import ConfirmModal from '../components/ui/ConfirmModal'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function lsKey(auditId) { return `qa_responses_${auditId}` }
+
+function getAnswer(response) {
+  if (!response) return null
+  if (!response.is_applicable) return 'na'
+  if (response.awarded_score === null || response.awarded_score === undefined) return null
+  return parseFloat(response.awarded_score) > 0 ? 'yes' : 'no'
+}
 
 // ── Point Row ────────────────────────────────────────────────────────────────
 
@@ -15,13 +27,19 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
   const fileInputRef = useRef()
   const toast = useToast()
 
-  const isNA = !response?.is_applicable
-  const score = response?.awarded_score ?? ''
+  const answer = getAnswer(response)
+  const isNA = answer === 'na'
   const comments = response?.comments ?? ''
+
+  const handleAnswer = (val) => {
+    if (val === 'yes')  onResponseChange(point.id, { is_applicable: true,  awarded_score: parseFloat(point.max_score) })
+    if (val === 'no')   onResponseChange(point.id, { is_applicable: true,  awarded_score: 0 })
+    if (val === 'na')   onResponseChange(point.id, { is_applicable: false, awarded_score: 0 })
+  }
 
   const handlePhotoCapture = async (e) => {
     const file = e.target.files?.[0]
-    if (!file) return
+    if (!file || !response?.id) return
     setUploading(true)
     try {
       const data = await api.uploadPhoto(auditId, response.id, file)
@@ -44,53 +62,60 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
   }
 
   return (
-    <div className={`border rounded-xl p-4 transition-all ${isNA ? 'border-gray-800 opacity-50' : 'border-gray-700 bg-gray-900/50'}`}>
-      {/* Point description + score */}
+    <div className={`border rounded-xl p-4 transition-all ${isNA ? 'border-gray-800 opacity-40' : 'border-gray-700 bg-gray-900/50'}`}>
+      {/* Description + max score */}
       <div className="flex items-start justify-between gap-3 mb-3">
-        <p className={`text-sm flex-1 ${isNA ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
+        <p className={`text-sm flex-1 leading-relaxed ${isNA ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
           {point.description}
         </p>
-        <div className="shrink-0 text-right">
-          <div className="text-xs text-gray-500 mb-1">out of {point.max_score}</div>
-        </div>
+        <span className="text-xs text-gray-500 shrink-0">{point.max_score} pts</span>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-wrap gap-3 items-center">
-        {/* N/A Toggle */}
-        {canEdit && (
-          <button
-            onClick={() => onResponseChange(point.id, { is_applicable: !response?.is_applicable })}
-            className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-              isNA
-                ? 'border-gray-600 bg-gray-800 text-gray-400'
-                : 'border-gray-700 text-gray-500 hover:border-gray-500'
-            }`}
-          >
-            {isNA ? 'N/A ✓' : 'N/A'}
-          </button>
-        )}
-
-        {/* Score input */}
-        {!isNA && (
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min="0"
-              max={point.max_score}
-              step="0.5"
-              value={score}
-              onChange={e => onResponseChange(point.id, { awarded_score: e.target.value })}
-              disabled={!canEdit}
-              placeholder="Score"
-              className="w-20 px-2 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm text-center focus:outline-none focus:border-amber-500 disabled:opacity-50"
-            />
-            <span className="text-xs text-gray-500">/ {point.max_score}</span>
-          </div>
-        )}
+      {/* Yes / No / N/A buttons */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => canEdit && handleAnswer('yes')}
+          disabled={!canEdit}
+          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors border ${
+            answer === 'yes'
+              ? 'bg-green-600 border-green-500 text-white'
+              : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-green-700 hover:text-green-400'
+          } disabled:cursor-default`}
+        >
+          Yes
+        </button>
+        <button
+          onClick={() => canEdit && handleAnswer('no')}
+          disabled={!canEdit}
+          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors border ${
+            answer === 'no'
+              ? 'bg-red-700 border-red-600 text-white'
+              : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-red-700 hover:text-red-400'
+          } disabled:cursor-default`}
+        >
+          No
+        </button>
+        <button
+          onClick={() => canEdit && handleAnswer('na')}
+          disabled={!canEdit}
+          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors border ${
+            answer === 'na'
+              ? 'bg-gray-600 border-gray-500 text-white'
+              : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300'
+          } disabled:cursor-default`}
+        >
+          N/A
+        </button>
       </div>
 
-      {/* Comments */}
+      {/* Score display */}
+      {answer && !isNA && (
+        <p className={`mt-2 text-xs font-medium ${answer === 'yes' ? 'text-green-400' : 'text-red-400'}`}>
+          {answer === 'yes' ? `+${point.max_score} pts` : '0 pts'}
+        </p>
+      )}
+
+      {/* Comments — only when yes or no */}
       {!isNA && (
         <textarea
           value={comments}
@@ -102,10 +127,10 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
         />
       )}
 
-      {/* Photos */}
-      {!isNA && response?.id && (
+      {/* Photos — show when not N/A and response exists */}
+      {!isNA && response && (
         <div className="mt-3">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 items-start">
             {photos.map(photo => (
               <div key={photo.id} className="relative group">
                 <img
@@ -116,7 +141,7 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
                 {canEdit && (
                   <button
                     onClick={() => handleDeletePhoto(photo.id)}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                   >
                     <X size={10} />
                   </button>
@@ -124,15 +149,14 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
               </div>
             ))}
 
-            {/* Camera button */}
             {canEdit && (
               <>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-700 flex flex-col items-center justify-center text-gray-600 hover:border-amber-500 hover:text-amber-500 transition-colors disabled:opacity-50"
+                  disabled={uploading || !response?.id}
+                  className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-gray-500 hover:border-amber-500 hover:text-amber-400 active:scale-95 transition-all disabled:opacity-40"
                 >
-                  {uploading ? <Spinner size={5} /> : <Camera size={20} />}
+                  {uploading ? <Spinner size={5} /> : <Camera size={22} />}
                   {!uploading && <span className="text-xs mt-1">Photo</span>}
                 </button>
                 <input
@@ -152,15 +176,16 @@ function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPho
   )
 }
 
-// ── Section ───────────────────────────────────────────────────────────────────
+// ── Section Panel ─────────────────────────────────────────────────────────────
 
 function SectionPanel({ section, responses, photos, onResponseChange, onPhotoAdd, onPhotoRemove, auditId, canEdit }) {
   const [open, setOpen] = useState(true)
-
   const sectionPoints = section.qa_form_points || []
+
   const applicable = sectionPoints.filter(p => responses[p.id]?.is_applicable !== false)
-  const totalMax = applicable.reduce((s, p) => s + (parseFloat(responses[p.id]?.max_score_snapshot) || parseFloat(p.max_score)), 0)
+  const totalMax = applicable.reduce((s, p) => s + parseFloat(p.max_score || 0), 0)
   const totalAwarded = applicable.reduce((s, p) => s + (parseFloat(responses[p.id]?.awarded_score) || 0), 0)
+  const answered = sectionPoints.filter(p => getAnswer(responses[p.id]) !== null).length
   const pct = totalMax > 0 ? Math.round((totalAwarded / totalMax) * 100) : 0
 
   return (
@@ -172,7 +197,7 @@ function SectionPanel({ section, responses, photos, onResponseChange, onPhotoAdd
         <div>
           <h3 className="font-semibold text-white text-sm">{section.title}</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            {totalAwarded} / {totalMax} pts ({pct}%)
+            {answered}/{sectionPoints.length} answered · {totalAwarded}/{totalMax} pts ({pct}%)
           </p>
         </div>
         {open ? <ChevronUp size={16} className="text-gray-500" /> : <ChevronDown size={16} className="text-gray-500" />}
@@ -201,7 +226,7 @@ function SectionPanel({ section, responses, photos, onResponseChange, onPhotoAdd
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-const SAVE_DEBOUNCE_MS = 1500
+const SAVE_DEBOUNCE_MS = 1200
 
 export default function AuditFormPage() {
   const { auditId } = useParams()
@@ -211,16 +236,20 @@ export default function AuditFormPage() {
 
   const [audit, setAudit] = useState(null)
   const [sections, setSections] = useState([])
-  const [responses, setResponses] = useState({})  // { pointId: responseData }
-  const [photos, setPhotos] = useState({})         // { responseId: [photos] }
+  const [responses, setResponses] = useState({})
+  const [photos, setPhotos] = useState({})
   const [loading, setLoading] = useState(true)
-  const [saveState, setSaveState] = useState('saved') // 'saved' | 'saving' | 'dirty'
+  const [saveState, setSaveState] = useState('saved')
   const [showDelete, setShowDelete] = useState(false)
   const [showSubmit, setShowSubmit] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
 
   const dirtyRef = useRef({})
+  const responsesRef = useRef({})
   const saveTimerRef = useRef(null)
+
+  // Keep responsesRef in sync for use in beforeunload
+  useEffect(() => { responsesRef.current = responses }, [responses])
 
   useEffect(() => {
     api.getAudit(auditId)
@@ -229,7 +258,6 @@ export default function AuditFormPage() {
         setAudit(a)
         setSections(a.sections || [])
 
-        // Build response map: pointId → response
         const rMap = {}
         const pMap = {}
         for (const s of a.sections || []) {
@@ -240,6 +268,21 @@ export default function AuditFormPage() {
             }
           }
         }
+
+        // Merge localStorage over server data (handles back/reload mid-edit)
+        try {
+          const saved = localStorage.getItem(lsKey(auditId))
+          if (saved) {
+            const local = JSON.parse(saved)
+            for (const [pointId, changes] of Object.entries(local)) {
+              if (rMap[pointId]) rMap[pointId] = { ...rMap[pointId], ...changes }
+            }
+            // Mark merged local changes as dirty so they get flushed to server
+            dirtyRef.current = local
+            setSaveState('dirty')
+          }
+        } catch {}
+
         setResponses(rMap)
         setPhotos(pMap)
       })
@@ -247,10 +290,15 @@ export default function AuditFormPage() {
       .finally(() => setLoading(false))
   }, [auditId])
 
-  const canEdit = audit && ['in_progress', 'edit_requested'].includes(audit.status) &&
-    (audit.auditor_id === user?.id || isQualityManager)
+  // Save dirty responses to localStorage on every change (synchronous — survives reload/back)
+  const persistLocal = useCallback((dirty) => {
+    try {
+      if (Object.keys(dirty).length > 0) {
+        localStorage.setItem(lsKey(auditId), JSON.stringify(dirty))
+      }
+    } catch {}
+  }, [auditId])
 
-  // ── Autosave logic ──
   const flushSave = useCallback(async (dirty) => {
     if (Object.keys(dirty).length === 0) return
     setSaveState('saving')
@@ -261,54 +309,63 @@ export default function AuditFormPage() {
       }))
       await api.saveAudit(auditId, payload)
       dirtyRef.current = {}
+      localStorage.removeItem(lsKey(auditId))
       setSaveState('saved')
     } catch (err) {
       setSaveState('dirty')
-      toast.error('Autosave failed: ' + err.message)
+      toast.error('Autosave failed — changes kept locally')
     }
   }, [auditId])
 
+  // beforeunload: persist to localStorage synchronously
+  useEffect(() => {
+    const handler = () => persistLocal(dirtyRef.current)
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [persistLocal])
+
+  // Flush on unmount (React navigation via back button)
+  useEffect(() => {
+    return () => {
+      clearTimeout(saveTimerRef.current)
+      persistLocal(dirtyRef.current)
+      if (Object.keys(dirtyRef.current).length > 0) {
+        api.saveAudit(auditId, Object.entries(dirtyRef.current).map(([pointId, changes]) => ({
+          point_id: pointId, ...changes
+        }))).then(() => localStorage.removeItem(lsKey(auditId))).catch(() => {})
+      }
+    }
+  }, [auditId, persistLocal])
+
+  const canEdit = audit && ['in_progress', 'edit_requested'].includes(audit.status) &&
+    (audit.auditor_id === user?.id || isQualityManager)
+
   const handleResponseChange = useCallback((pointId, changes) => {
-    setResponses(prev => ({
-      ...prev,
-      [pointId]: { ...prev[pointId], ...changes }
-    }))
+    setResponses(prev => ({ ...prev, [pointId]: { ...prev[pointId], ...changes } }))
 
     dirtyRef.current[pointId] = {
       ...(dirtyRef.current[pointId] || {}),
       ...changes,
-      is_applicable: changes.is_applicable !== undefined
-        ? changes.is_applicable
-        : (dirtyRef.current[pointId]?.is_applicable ?? responses[pointId]?.is_applicable ?? true),
     }
 
     setSaveState('dirty')
+    persistLocal(dirtyRef.current)
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => flushSave({ ...dirtyRef.current }), SAVE_DEBOUNCE_MS)
-  }, [flushSave, responses])
+  }, [flushSave, persistLocal])
 
   const handlePhotoAdd = (responseId, photo) => {
     setPhotos(prev => ({ ...prev, [responseId]: [...(prev[responseId] || []), photo] }))
   }
-
   const handlePhotoRemove = (responseId, photoId) => {
     setPhotos(prev => ({ ...prev, [responseId]: (prev[responseId] || []).filter(p => p.id !== photoId) }))
   }
-
-  // Save on unmount if dirty
-  useEffect(() => {
-    return () => {
-      clearTimeout(saveTimerRef.current)
-      if (Object.keys(dirtyRef.current).length > 0) {
-        flushSave(dirtyRef.current)
-      }
-    }
-  }, [flushSave])
 
   const handleDelete = async () => {
     setActionLoading(true)
     try {
       await api.deleteAudit(auditId)
+      localStorage.removeItem(lsKey(auditId))
       toast.success('Audit deleted')
       navigate(-2)
     } catch (err) {
@@ -321,12 +378,12 @@ export default function AuditFormPage() {
 
   const handleSubmit = async () => {
     setActionLoading(true)
-    // Flush any pending saves first
     clearTimeout(saveTimerRef.current)
     await flushSave({ ...dirtyRef.current })
     try {
       const data = await api.submitAudit(auditId)
       setAudit(data.audit)
+      localStorage.removeItem(lsKey(auditId))
       toast.success('Audit submitted for review')
       setShowSubmit(false)
     } catch (err) {
@@ -366,12 +423,14 @@ export default function AuditFormPage() {
   if (loading) return <div className="flex justify-center pt-20"><Spinner /></div>
   if (!audit) return <div className="text-center text-gray-500 pt-20">Audit not found</div>
 
-  const totalAwarded = audit.total_awarded_score
-  const totalMax = audit.total_max_score
   const pct = audit.score_percentage
 
+  // Count answered points for progress
+  const allPoints = sections.flatMap(s => s.qa_form_points || [])
+  const answeredCount = allPoints.filter(p => getAnswer(responses[p.id]) !== null).length
+
   return (
-    <div className="max-w-2xl mx-auto pb-32">
+    <div className="max-w-2xl mx-auto pb-36 md:pb-24">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-gray-950 border-b border-gray-800 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
@@ -386,19 +445,34 @@ export default function AuditFormPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <StatusBadge status={audit.status} />
-            {/* Save indicator */}
             {canEdit && (
-              <span className={`text-xs ${saveState === 'saved' ? 'text-green-500' : saveState === 'saving' ? 'text-amber-400' : 'text-gray-500'}`}>
-                {saveState === 'saving' ? 'Saving...' : saveState === 'dirty' ? 'Unsaved' : '✓ Saved'}
+              <span className={`text-xs ${
+                saveState === 'saved' ? 'text-green-500' :
+                saveState === 'saving' ? 'text-amber-400' : 'text-gray-500'
+              }`}>
+                {saveState === 'saving' ? 'Saving...' : saveState === 'dirty' ? '●' : '✓'}
               </span>
             )}
           </div>
         </div>
 
-        {/* Score bar (shows after submitted/approved) */}
+        {/* Progress bar */}
+        {canEdit && allPoints.length > 0 && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+            <span>{answeredCount}/{allPoints.length} answered</span>
+            <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-500 rounded-full transition-all"
+                style={{ width: `${(answeredCount / allPoints.length) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Score bar — after submit/approve */}
         {pct != null && (
           <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
-            <span>Score: {totalAwarded} / {totalMax} pts</span>
+            <span>Score: {audit.total_awarded_score}/{audit.total_max_score} pts</span>
             <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
               <div className="h-full bg-amber-400 rounded-full" style={{ width: `${pct}%` }} />
             </div>
@@ -412,7 +486,7 @@ export default function AuditFormPage() {
         <div className="mx-4 mt-4 p-4 bg-orange-900/30 border border-orange-700 rounded-xl">
           <div className="flex items-center gap-2 text-orange-400 font-medium text-sm mb-1">
             <AlertTriangle size={16} />
-            Edit Requested
+            Edit Requested by Quality Manager
           </div>
           <p className="text-sm text-orange-200">{audit.manager_comments}</p>
         </div>
@@ -435,18 +509,16 @@ export default function AuditFormPage() {
         ))}
       </div>
 
-      {/* Action bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 bg-gray-950 border-t border-gray-800 p-4 flex gap-3 md:static md:border-0 md:bg-transparent md:mt-4">
-
-        {/* Auditor: delete + submit */}
+      {/* Action bar — sits ABOVE bottom nav on mobile (bottom-16), normal on desktop */}
+      <div className="fixed bottom-16 md:bottom-0 left-0 right-0 z-30 bg-gray-950/95 backdrop-blur border-t border-gray-800 px-4 py-3 flex gap-3">
         {canEdit && audit.auditor_id === user?.id && (
           <>
             <button
               onClick={() => setShowDelete(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-800 text-red-400 hover:bg-red-900/20 text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-red-800 text-red-400 hover:bg-red-900/20 text-sm font-medium transition-colors shrink-0"
             >
               <Trash2 size={16} />
-              Delete
+              <span className="hidden sm:inline">Delete</span>
             </button>
             <button
               onClick={() => setShowSubmit(true)}
@@ -458,10 +530,9 @@ export default function AuditFormPage() {
           </>
         )}
 
-        {/* Quality manager: approve + request edit */}
         {isQualityManager && audit.status === 'submitted' && (
           <>
-            <RequestEditButton auditId={auditId} onDone={(updated) => setAudit(updated)} />
+            <RequestEditButton auditId={auditId} onDone={setAudit} />
             <button
               onClick={handleApprove}
               disabled={actionLoading}
@@ -473,7 +544,6 @@ export default function AuditFormPage() {
           </>
         )}
 
-        {/* PDF export (always visible for completed audits) */}
         {['submitted', 'approved'].includes(audit.status) && (
           <button
             onClick={handleExportPdf}
@@ -491,11 +561,10 @@ export default function AuditFormPage() {
         onConfirm={handleDelete}
         loading={actionLoading}
         title="Delete Audit"
-        message={`Are you sure you want to delete this audit for ${audit.branches?.name}? This cannot be undone and all photos will be permanently removed.`}
+        message={`Delete this audit for ${audit.branches?.name}? This cannot be undone and all photos will be permanently removed.`}
         confirmLabel="Delete Audit"
         danger
       />
-
       <ConfirmModal
         open={showSubmit}
         onClose={() => setShowSubmit(false)}
@@ -509,7 +578,7 @@ export default function AuditFormPage() {
   )
 }
 
-// ── Request Edit inline component ─────────────────────────────────────────────
+// ── Request Edit ──────────────────────────────────────────────────────────────
 
 function RequestEditButton({ auditId, onDone }) {
   const [open, setOpen] = useState(false)
@@ -518,7 +587,7 @@ function RequestEditButton({ auditId, onDone }) {
   const toast = useToast()
 
   const handleSubmit = async () => {
-    if (!comments.trim()) { toast.error('Please add comments explaining what to edit'); return }
+    if (!comments.trim()) { toast.error('Please describe what needs to be fixed'); return }
     setLoading(true)
     try {
       const data = await api.requestEdit(auditId, comments)
@@ -537,7 +606,7 @@ function RequestEditButton({ auditId, onDone }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-orange-700 text-orange-400 hover:bg-orange-900/20 text-sm font-medium transition-colors"
+        className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-orange-700 text-orange-400 hover:bg-orange-900/20 text-sm font-medium transition-colors shrink-0"
       >
         Request Edit
       </button>
@@ -547,7 +616,7 @@ function RequestEditButton({ auditId, onDone }) {
           value={comments}
           onChange={e => setComments(e.target.value)}
           rows={4}
-          placeholder="e.g. Section 2 - Point 3 score seems too high. Please re-evaluate."
+          placeholder="e.g. Section 2, Point 3 — please re-evaluate and add a photo."
           className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-orange-500 resize-none mb-4"
         />
         <div className="flex gap-3 justify-end">
@@ -566,6 +635,3 @@ function RequestEditButton({ auditId, onDone }) {
     </>
   )
 }
-
-// Modal re-export for inline use
-import Modal from '../components/ui/Modal'
