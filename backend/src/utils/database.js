@@ -1,13 +1,14 @@
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const url = process.env.SUPABASE_URL;
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('Missing Supabase credentials. Check your .env file.');
+if (!url || !key) {
+  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
 }
 
-const supabase = createClient(supabaseUrl || '', supabaseKey || '');
+const supabase = createClient(url, key, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 module.exports = supabase;

@@ -1,41 +1,76 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
 import { LogOut, User } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
-const ROLE_LABELS = {
-  admin: 'Admin',
-  quality_manager: 'Quality Manager',
-  auditor: 'Auditor',
-  branch_manager: 'Branch Manager',
-  top_management: 'Top Management',
-  operations_manager: 'Ops Manager',
-  area_manager: 'Area Manager',
-}
-
 export default function ProfilePage() {
   const { user, logout } = useAuth()
-
+  if (!user) return null
   return (
-    <div className="max-w-md mx-auto p-4">
-      <h1 className="text-xl font-bold text-white mb-6">Profile</h1>
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col items-center gap-4">
-        <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center">
-          <User size={28} className="text-gray-400" />
-        </div>
-        <div className="text-center">
-          <h2 className="text-lg font-semibold text-white">{user?.name}</h2>
-          <p className="text-sm text-gray-500">{user?.email}</p>
-          <span className="inline-block mt-2 px-3 py-1 rounded-full bg-amber-900/30 text-amber-400 text-xs font-medium">
-            {ROLE_LABELS[user?.role] || user?.role}
-          </span>
+    <div style={{ padding: 24, maxWidth: 520, margin: '0 auto' }}>
+      <div
+        style={{
+          background: 'var(--color-bg-card)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-xl)',
+          padding: 24,
+          boxShadow: 'var(--shadow-sm)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+          {user.avatar_url ? (
+            <img
+              src={user.avatar_url}
+              alt=""
+              style={{ width: 56, height: 56, borderRadius: 999, objectFit: 'cover' }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 999,
+                background: 'var(--color-bg-hover)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <User size={24} color="var(--color-text-muted)" />
+            </div>
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text)' }}>
+              {user.name}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{user.email}</div>
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--color-primary)',
+                textTransform: 'capitalize',
+                marginTop: 4,
+              }}
+            >
+              {user.role?.replace(/_/g, ' ')}
+            </div>
+          </div>
         </div>
         <button
           onClick={logout}
-          className="mt-2 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-sm font-medium text-white transition-colors w-full justify-center"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 14px',
+            fontSize: 14,
+            fontWeight: 600,
+            color: 'var(--color-danger)',
+            background: 'transparent',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+          }}
         >
-          <LogOut size={16} />
-          Sign Out
+          <LogOut size={16} /> Sign out
         </button>
       </div>
     </div>

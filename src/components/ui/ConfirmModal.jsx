@@ -1,25 +1,51 @@
 import React from 'react'
 import Modal from './Modal'
 
-export default function ConfirmModal({ open, onClose, onConfirm, title, message, confirmLabel = 'Confirm', danger = false, loading = false }) {
+export default function ConfirmModal({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  danger = false,
+  loading = false,
+}) {
   return (
     <Modal open={open} onClose={onClose} title={title}>
-      <p className="text-gray-300 text-sm mb-6">{message}</p>
-      <div className="flex gap-3 justify-end">
+      <p style={{ fontSize: 14, color: 'var(--color-text-secondary)', marginBottom: 20 }}>
+        {message}
+      </p>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button
           onClick={onClose}
-          className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm font-medium transition-colors"
+          style={{
+            padding: '10px 14px',
+            fontSize: 14,
+            fontWeight: 600,
+            color: 'var(--color-text-secondary)',
+            background: 'transparent',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+          }}
         >
           Cancel
         </button>
         <button
           onClick={onConfirm}
           disabled={loading}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
-            danger ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'
-          }`}
+          style={{
+            padding: '10px 14px',
+            fontSize: 14,
+            fontWeight: 700,
+            color: '#FFFFFF',
+            background: danger ? 'var(--color-danger)' : 'var(--color-primary)',
+            borderRadius: 'var(--radius-md)',
+            opacity: loading ? 0.6 : 1,
+            cursor: loading ? 'wait' : 'pointer',
+          }}
         >
-          {loading ? 'Please wait...' : confirmLabel}
+          {loading ? 'Please wait…' : confirmLabel}
         </button>
       </div>
     </Modal>

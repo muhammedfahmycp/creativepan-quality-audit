@@ -7,9 +7,9 @@ export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
 
   const addToast = useCallback((message, type = 'info') => {
-    const id = Date.now()
-    setToasts(t => [...t, { id, message, type }])
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500)
+    const id = Date.now() + Math.random()
+    setToasts((t) => [...t, { id, message, type }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500)
   }, [])
 
   const toast = {
@@ -19,23 +19,56 @@ export function ToastProvider({ children }) {
   }
 
   const icons = { success: CheckCircle, error: XCircle, info: AlertCircle }
-  const colors = {
-    success: 'bg-green-800 border-green-600 text-green-100',
-    error:   'bg-red-900 border-red-600 text-red-100',
-    info:    'bg-gray-800 border-gray-600 text-gray-100',
+  const colorFor = {
+    success: { bg: '#DCFCE7', fg: '#166534', border: '#BBF7D0' },
+    error:   { bg: '#FEE2E2', fg: '#991B1B', border: '#FECACA' },
+    info:    { bg: '#E0E7FF', fg: '#312E81', border: '#C7D2FE' },
   }
 
   return (
     <ToastContext.Provider value={toast}>
       {children}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full px-4">
-        {toasts.map(t => {
+      <div
+        style={{
+          position: 'fixed',
+          top: 16,
+          right: 16,
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          maxWidth: 420,
+          width: 'calc(100% - 32px)',
+        }}
+      >
+        {toasts.map((t) => {
           const Icon = icons[t.type]
+          const c = colorFor[t.type]
           return (
-            <div key={t.id} className={`flex items-start gap-3 p-3 rounded-lg border text-sm ${colors[t.type]} shadow-xl`}>
-              <Icon size={18} className="mt-0.5 shrink-0" />
-              <span className="flex-1">{t.message}</span>
-              <button onClick={() => setToasts(ts => ts.filter(x => x.id !== t.id))}>
+            <div
+              key={t.id}
+              className="animate-slide-up"
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                padding: '10px 12px',
+                background: c.bg,
+                color: c.fg,
+                border: `1px solid ${c.border}`,
+                borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-md)',
+                fontSize: 14,
+                lineHeight: 1.4,
+              }}
+            >
+              <Icon size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+              <span style={{ flex: 1 }}>{t.message}</span>
+              <button
+                onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}
+                style={{ color: 'inherit', padding: 2 }}
+                aria-label="Dismiss"
+              >
                 <X size={16} />
               </button>
             </div>

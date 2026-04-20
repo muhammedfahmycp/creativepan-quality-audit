@@ -17,9 +17,25 @@ import FormDesignerPage from './pages/settings/FormDesignerPage'
 import BranchesPage from './pages/settings/BranchesPage'
 import UsersPage from './pages/settings/UsersPage'
 
+function FullScreenLoader() {
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--color-bg)',
+      }}
+    >
+      <Spinner size={32} />
+    </div>
+  )
+}
+
 function ProtectedRoute({ children, need }) {
   const { user, loading, isQualityManager, isAuditor } = useAuth()
-  if (loading) return <div className="flex justify-center items-center min-h-screen"><Spinner size={8} /></div>
+  if (loading) return <FullScreenLoader />
   if (!user) return <Navigate to="/login" replace />
   if (need === 'quality_manager' && !isQualityManager) return <Navigate to="/" replace />
   if (need === 'auditor' && !isAuditor) return <Navigate to="/" replace />
@@ -28,8 +44,7 @@ function ProtectedRoute({ children, need }) {
 
 function AppRoutes() {
   const { user, loading } = useAuth()
-
-  if (loading) return <div className="flex justify-center items-center min-h-screen"><Spinner size={8} /></div>
+  if (loading) return <FullScreenLoader />
 
   return (
     <Routes>

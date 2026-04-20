@@ -1,215 +1,224 @@
-import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, Pencil, Check, X, Trash2 } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import { ArrowLeft, Plus, Trash2, X } from 'lucide-react'
 import api from '../../utils/api'
 import Spinner from '../../components/ui/Spinner'
 import Modal from '../../components/ui/Modal'
 import ConfirmModal from '../../components/ui/ConfirmModal'
+import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 
-const ROLES = ['quality_manager', 'quality_auditor']
-const ROLE_LABELS = {
-  quality_manager: 'Quality Manager',
-  quality_auditor: 'Quality Auditor',
-}
-const ROLE_COLORS = {
-  quality_manager: 'text-purple-400',
-  quality_auditor: 'text-blue-400',
-}
+const ROLES = [
+  { value: 'top_management',  label: 'Top Management' },
+  { value: 'quality_manager', label: 'Quality Manager' },
+  { value: 'quality_auditor', label: 'Quality Auditor' },
+]
 
-function UserRow({ user, onRoleChange, onRemove }) {
-  const [editing, setEditing]   = useState(false)
-  const [role, setRole]         = useState(user.role)
-  const [saving, setSaving]     = useState(false)
-  const [confirmRemove, setConfirmRemove] = useState(false)
+export default function UsersPage() {
+  const { user: me } = useAuth()
   const toast = useToast()
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showNew, setShowNew] = useState(false)
+  const [form, setForm] = useState({ email: '', name: '', role: 'quality_auditor' })
+  const [saving, setSaving] = useState(false)
+  const [confirm, setConfirm] = useState(null)
 
-  const save = async () => {
+  const load = useCallback(async () => {
+    try { const d = await api.getQAUsers(); setUsers(d.users || []) }
+    catch (e) { toast.error(e.message) }
+    finally { setLoading(false) }
+  }, [toast])
+
+  useEffect(() => { load() }, [load])
+
+  async function createUser() {
+    if (!form.email.trim() || !form.name.trim()) {
+      toast.error('Email and name are required')
+      return
+    }
     setSaving(true)
     try {
-      await api.updateQAUserRole(user.id, role)
-      onRoleChange(user.id, role)
-      setEditing(false)
+      await api.createQAUser({ email: form.email.trim().toLowerCase(), name: form.name.trim(), role: form.role })
+      setShowNew(false); setForm({ email: '', name: '', role: 'quality_auditor' })
+      await load()
+      toast.success('User created')
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
   }
 
-  return (
-    <>
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800/50 last:border-0">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white truncate">{user.name}</p>
-          <p className="text-xs text-gray-500 truncate">{user.email}</p>
-        </div>
-
-        <div className="shrink-0 flex items-center gap-2">
-          {editing ? (
-            <>
-              <select
-                value={role}
-                onChange={e => setRole(e.target.value)}
-                className="bg-gray-800 border border-gray-700 text-xs text-white rounded px-2 py-1 focus:outline-none"
-              >
-                {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-              </select>
-              <button onClick={save} disabled={saving} className="text-green-400 hover:text-green-300 disabled:opacity-50">
-                <Check size={14} />
-              </button>
-              <button onClick={() => { setEditing(false); setRole(user.role) }} className="text-gray-500 hover:text-gray-300">
-                <X size={14} />
-              </button>
-            </>
-          ) : (
-            <>
-              <span className={`text-xs font-medium ${ROLE_COLORS[user.role] || 'text-gray-400'}`}>
-                {ROLE_LABELS[user.role] || user.role}
-              </span>
-              <button onClick={() => setEditing(true)} className="text-gray-600 hover:text-gray-300 transition-colors">
-                <Pencil size={13} />
-              </button>
-              <button onClick={() => setConfirmRemove(true)} className="text-gray-600 hover:text-red-400 transition-colors">
-                <Trash2 size={13} />
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      <ConfirmModal
-        open={confirmRemove}
-        onClose={() => setConfirmRemove(false)}
-        onConfirm={() => onRemove(user.id)}
-        title="Remove QA Access"
-        message={`Remove ${user.name}'s access to the Quality Audit system? They will no longer be able to sign in.`}
-        confirmLabel="Remove"
-        danger
-      />
-    </>
-  )
-}
-
-export default function UsersPage() {
-  const navigate = useNavigate()
-  const toast    = useToast()
-  const [users,   setUsers]   = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
-  const [filter,  setFilter]  = useState('all')
-
-  const [newName,  setNewName]  = useState('')
-  const [newEmail, setNewEmail] = useState('')
-  const [newRole,  setNewRole]  = useState('quality_auditor')
-  const [adding,   setAdding]   = useState(false)
-
-  useEffect(() => {
-    api.getQAUsers()
-      .then(d => setUsers(d.users || []))
-      .catch(e => toast.error(e.message))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const handleAdd = async () => {
-    if (!newName.trim() || !newEmail.trim()) { toast.error('Name and email required'); return }
-    setAdding(true)
-    try {
-      const data = await api.createQAUser({ name: newName.trim(), email: newEmail.trim(), role: newRole })
-      setUsers(u => [...u, data.user])
-      setNewName(''); setNewEmail(''); setNewRole('quality_auditor')
-      setShowAdd(false)
-      toast.success('User added')
-    } catch (e) { toast.error(e.message) }
-    finally { setAdding(false) }
+  async function changeRole(u, role) {
+    try { await api.updateQAUserRole(u.id, role); await load() }
+    catch (e) { toast.error(e.message) }
   }
 
-  const handleRoleChange = (userId, role) =>
-    setUsers(u => u.map(x => x.id === userId ? { ...x, role } : x))
-
-  const handleRemove = async (userId) => {
-    try {
-      await api.removeQAUser(userId)
-      setUsers(u => u.filter(x => x.id !== userId))
-      toast.success('Access removed')
-    } catch (e) { toast.error(e.message) }
+  async function removeUser(u) {
+    try { await api.removeQAUser(u.id); setConfirm(null); await load(); toast.success('User deactivated') }
+    catch (e) { toast.error(e.message) }
   }
 
-  const filtered = filter === 'all' ? users : users.filter(u => u.role === filter)
-
-  if (loading) return <div className="flex justify-center pt-20"><Spinner /></div>
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spinner size={28} /></div>
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="sticky top-0 z-10 bg-gray-950 border-b border-gray-800 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="text-gray-400 hover:text-white">
-          <ArrowLeft size={20} />
-        </button>
-        <h1 className="text-sm font-semibold text-white flex-1">QA Team</h1>
+    <div style={{ maxWidth: 820, margin: '0 auto', padding: 16 }}>
+      <Link to="/settings" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--color-text-muted)', fontSize: 13, textDecoration: 'none', marginBottom: 12 }}>
+        <ArrowLeft size={16} /> Back to settings
+      </Link>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Users</h1>
         <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-900 text-xs font-semibold transition-colors"
+          onClick={() => setShowNew(true)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '8px 14px',
+            background: 'var(--color-primary)',
+            color: '#FFFFFF',
+            borderRadius: 'var(--radius-md)',
+            fontWeight: 700,
+            fontSize: 13,
+          }}
         >
-          <Plus size={14} /> Add User
+          <Plus size={16} /> Add user
         </button>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 px-4 py-3 border-b border-gray-800">
-        {['all', ...ROLES].map(r => (
-          <button
-            key={r}
-            onClick={() => setFilter(r)}
-            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-              filter === r ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'
-            }`}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {users.map((u) => (
+          <div
+            key={u.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: 14,
+              background: 'var(--color-bg-card)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              opacity: u.is_active ? 1 : 0.5,
+            }}
           >
-            {r === 'all' ? 'All' : ROLE_LABELS[r]}
-          </button>
+            {u.avatar_url ? (
+              <img src={u.avatar_url} alt="" style={{ width: 36, height: 36, borderRadius: 999, objectFit: 'cover' }} />
+            ) : (
+              <div style={{ width: 36, height: 36, borderRadius: 999, background: 'var(--color-bg-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--color-text-muted)' }}>
+                {u.name.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text)' }}>{u.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+            </div>
+            <select
+              value={u.role}
+              onChange={(e) => changeRole(u, e.target.value)}
+              disabled={u.id === me?.id}
+              style={{
+                padding: '6px 8px',
+                fontSize: 12,
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--color-bg-elevated)',
+              }}
+            >
+              {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+            {u.id !== me?.id && u.is_active && (
+              <button
+                onClick={() => setConfirm(u)}
+                style={{ color: 'var(--color-danger)', padding: 6 }}
+                aria-label="Deactivate"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
         ))}
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl m-4 overflow-hidden">
-        {filtered.length === 0
-          ? <p className="text-center text-gray-600 py-8 text-sm">No users found.</p>
-          : filtered.map(u =>
-              <UserRow key={u.id} user={u} onRoleChange={handleRoleChange} onRemove={handleRemove} />
-            )
-        }
-      </div>
-
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add QA Team Member">
-        <div className="flex flex-col gap-3">
-          <input
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-            placeholder="Full name"
-            className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-amber-500"
-          />
-          <input
-            value={newEmail}
-            onChange={e => setNewEmail(e.target.value)}
-            placeholder="Email address"
-            type="email"
-            className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-amber-500"
-          />
-          <select
-            value={newRole}
-            onChange={e => setNewRole(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-white focus:outline-none focus:border-amber-500"
-          >
-            {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-          </select>
-          <p className="text-xs text-gray-500">
-            The user signs in with Google using this email. Their access is active immediately.
-          </p>
-          <div className="flex gap-3 justify-end pt-1">
-            <button onClick={() => setShowAdd(false)} className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm font-medium">
-              Cancel
-            </button>
-            <button onClick={handleAdd} disabled={adding} className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-900 text-sm font-semibold disabled:opacity-50">
-              {adding ? 'Adding...' : 'Add User'}
+      <Modal open={showNew} onClose={() => setShowNew(false)} title="Add user">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Email</div>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              placeholder="someone@creativepan.com.eg"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                fontSize: 14,
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            />
+          </label>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Name</div>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Full name"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                fontSize: 14,
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            />
+          </label>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Role</div>
+            <select
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                fontSize: 14,
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          </label>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 }}>
+            <button onClick={() => setShowNew(false)} style={{ padding: '10px 14px', fontSize: 14, color: 'var(--color-text-secondary)' }}>Cancel</button>
+            <button
+              onClick={createUser}
+              disabled={saving}
+              style={{
+                padding: '10px 14px',
+                fontSize: 14,
+                fontWeight: 700,
+                color: '#FFFFFF',
+                background: 'var(--color-primary)',
+                borderRadius: 'var(--radius-md)',
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? 'Creating…' : 'Create'}
             </button>
           </div>
         </div>
       </Modal>
+
+      <ConfirmModal
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => removeUser(confirm)}
+        title="Deactivate user?"
+        message={`${confirm?.name} won't be able to log in until reactivated.`}
+        confirmLabel="Deactivate"
+        danger
+      />
     </div>
   )
 }

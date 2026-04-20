@@ -1,205 +1,209 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, User, Calendar, ChevronRight, Play, RotateCcw } from 'lucide-react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import { ArrowLeft, Play, ChevronRight, RotateCcw } from 'lucide-react'
 import api from '../utils/api'
-import StatusBadge from '../components/ui/StatusBadge'
 import Spinner from '../components/ui/Spinner'
-import ConfirmModal from '../components/ui/ConfirmModal'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
-function formatDate(iso) {
-  if (!iso) return null
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+function statusPillStyle(status) {
+  const map = {
+    not_started:     { bg: 'var(--color-bg-hover)',     fg: 'var(--color-text-muted)',    label: 'Not started' },
+    in_progress:     { bg: '#DBEAFE', fg: '#1E3A8A', label: 'In progress' },
+    submitted:       { bg: '#FEF3C7', fg: '#92400E', label: 'Submitted' },
+    edits_requested: { bg: '#FFEDD5', fg: '#9A3412', label: 'Edits requested' },
+    approved:        { bg: '#DCFCE7', fg: '#166534', label: 'Approved' },
+  }
+  return map[status] || map.not_started
 }
 
 export default function BranchListPage() {
   const { brandId, month } = useParams()
   const navigate = useNavigate()
-  const { user, isAuditor } = useAuth()
+  const { isAuditor, user } = useAuth()
   const toast = useToast()
 
   const [brand, setBrand] = useState(null)
   const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
-  const [starting, setStarting] = useState(null) // branchId being started
-  const [confirmStart, setConfirmStart] = useState(null) // { branchId, branchName }
-
-  const monthLabel = (() => {
-    const [y, m] = month.split('-')
-    return `${MONTH_NAMES[parseInt(m) - 1]} ${y}`
-  })()
+  const [startingId, setStartingId] = useState(null)
 
   const load = useCallback(async () => {
+    setLoading(true)
     try {
-      const [brandsData, branchData] = await Promise.all([
+      const [brandsResp, branchResp] = await Promise.all([
         api.getBrands(),
         api.getBrandBranches(brandId, month),
       ])
-      const found = brandsData.brands?.find(b => b.id === brandId)
-      setBrand(found)
-      setBranches(branchData.branches || [])
+      setBrand(brandsResp.brands.find((b) => b.id === brandId) || null)
+      setBranches(branchResp.branches || [])
     } catch (err) {
       toast.error(err.message)
     } finally {
       setLoading(false)
     }
-  }, [brandId, month])
+  }, [brandId, month, toast])
 
   useEffect(() => { load() }, [load])
 
-  const handleStart = async (branchId, branchName) => {
-    setConfirmStart({ branchId, branchName })
-  }
-
-  const confirmStartAudit = async () => {
-    const { branchId: bid } = confirmStart
-    setConfirmStart(null)
-    setStarting(bid)
+  async function startOrOpen(branch) {
+    if (branch.audit) {
+      navigate(`/audits/${branch.audit.id}`)
+      return
+    }
+    if (!isAuditor) {
+      toast.error('Only auditors can start audits')
+      return
+    }
+    setStartingId(branch.id)
     try {
-      const data = await api.startAudit(bid, brandId, month)
-      navigate(`/audits/${data.audit.id}`)
+      const resp = await api.startAudit(branch.id, brandId, month)
+      navigate(`/audits/${resp.audit.id}`)
     } catch (err) {
-      if (err.message.includes('already exists')) {
-        toast.error('An audit already exists for this branch and month')
-        load()
-      } else {
-        toast.error(err.message)
-      }
-    } finally {
-      setStarting(null)
+      toast.error(err.message)
+      setStartingId(null)
     }
   }
 
-  const handleBranchClick = (branch) => {
-    if (!branch.audit) return // not started — button handles it
-    navigate(`/audits/${branch.audit.id}`)
-  }
-
-  if (loading) return <div className="flex justify-center pt-20"><Spinner /></div>
+  const [year, m] = month.split('-')
+  const monthLabel = `${MONTHS[parseInt(m, 10) - 1]} ${year}`
 
   return (
-    <div className="max-w-2xl mx-auto">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-gray-950 border-b border-gray-800 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="text-gray-400 hover:text-white transition-colors">
-          <ArrowLeft size={20} />
-        </button>
-        <div>
-          <h1 className="text-base font-semibold text-white">{brand?.name}</h1>
-          <p className="text-xs text-gray-500">{monthLabel}</p>
-        </div>
+    <div style={{ maxWidth: 820, margin: '0 auto', padding: 16 }}>
+      <Link
+        to="/"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: 'var(--color-text-muted)',
+          fontSize: 13,
+          textDecoration: 'none',
+          marginBottom: 12,
+        }}
+      >
+        <ArrowLeft size={16} /> Back
+      </Link>
+
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
+        {brand && (
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: 999,
+              background: brand.color,
+              display: 'inline-block',
+            }}
+          />
+        )}
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-text)' }}>
+          {brand?.name || '…'}
+        </h1>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 16 }}>
+        {monthLabel}
       </div>
 
-      {/* Branch cards */}
-      <div className="p-4 flex flex-col gap-3">
-        {branches.length === 0 && (
-          <div className="text-center text-gray-500 py-16 text-sm">
-            No branches assigned to this brand yet.<br />
-            <span className="text-gray-600">Go to Settings → Branches to add them.</span>
-          </div>
-        )}
-
-        {branches.map(branch => {
-          const audit = branch.audit
-          const status = branch.status
-          const isOwn = audit?.auditor_id === user?.id
-          const canContinue = audit && isOwn && ['in_progress', 'edit_requested'].includes(status)
-          const isLocked = audit && !isOwn && status === 'in_progress'
-
-          return (
-            <div
-              key={branch.branch_id}
-              onClick={() => audit && !isLocked && handleBranchClick(branch)}
-              className={`bg-gray-900 border border-gray-800 rounded-xl p-4 transition-all ${
-                audit && !isLocked ? 'cursor-pointer hover:border-gray-600 active:scale-[0.99]' : ''
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-white text-sm">{branch.branch_name}</h3>
-
-                  <div className="mt-2 flex flex-wrap gap-2 items-center">
-                    <StatusBadge status={status} />
-
-                    {audit?.auditor_name && (
-                      <span className="flex items-center gap-1 text-xs text-gray-500">
-                        <User size={12} />
-                        {audit.auditor_name}
-                        {isOwn && <span className="text-amber-400">(you)</span>}
-                      </span>
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
+          <Spinner size={28} />
+        </div>
+      ) : branches.length === 0 ? (
+        <div
+          style={{
+            textAlign: 'center',
+            padding: '40px 16px',
+            color: 'var(--color-text-muted)',
+            background: 'var(--color-bg-card)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-lg)',
+          }}
+        >
+          No branches assigned to this brand yet.
+          <br />
+          <span style={{ fontSize: 13 }}>Assign branches in Settings → Branches.</span>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 10 }}>
+          {branches.map((b) => {
+            const status = b.audit?.status || 'not_started'
+            const pill = statusPillStyle(status)
+            const isMine = b.audit && b.audit.auditor_id === user?.id
+            const isLocked = b.audit && !isMine && ['in_progress', 'edits_requested'].includes(status)
+            return (
+              <button
+                key={b.id}
+                onClick={() => !isLocked && startOrOpen(b)}
+                disabled={isLocked || startingId === b.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: 14,
+                  background: 'var(--color-bg-card)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-lg)',
+                  boxShadow: 'var(--shadow-sm)',
+                  textAlign: 'left',
+                  cursor: isLocked ? 'not-allowed' : 'pointer',
+                  opacity: isLocked ? 0.55 : 1,
+                  transition: 'border-color 0.15s, box-shadow 0.15s',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>
+                    {b.name}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      marginTop: 6,
+                      fontSize: 12,
+                      color: 'var(--color-text-muted)',
+                    }}
+                  >
+                    <span
+                      style={{
+                        padding: '3px 8px',
+                        background: pill.bg,
+                        color: pill.fg,
+                        borderRadius: 999,
+                        fontWeight: 600,
+                        fontSize: 11,
+                      }}
+                    >
+                      {pill.label}
+                    </span>
+                    {b.audit?.score_percentage != null && (
+                      <span className="font-mono">{Number(b.audit.score_percentage).toFixed(1)}%</span>
                     )}
-
-                    {audit?.started_at && (
-                      <span className="flex items-center gap-1 text-xs text-gray-500">
-                        <Calendar size={12} />
-                        {formatDate(audit.started_at)}
-                      </span>
+                    {b.audit?.auditor_name && (
+                      <span>· {b.audit.auditor_name}</span>
                     )}
                   </div>
-
-                  {audit?.score_percentage != null && status === 'approved' && (
-                    <div className="mt-2 text-xs font-medium" style={{ color: brand?.color }}>
-                      Score: {audit.score_percentage}%
-                    </div>
-                  )}
-
-                  {status === 'edit_requested' && isOwn && (
-                    <div className="mt-2 text-xs text-orange-400">
-                      Edit requested — tap to view feedback
-                    </div>
-                  )}
-
-                  {isLocked && (
-                    <div className="mt-2 text-xs text-gray-600">
-                      Locked — being audited by {audit.auditor_name}
-                    </div>
+                </div>
+                <div style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {startingId === b.id ? (
+                    <Spinner size={18} />
+                  ) : b.audit ? (
+                    <ChevronRight size={20} />
+                  ) : (
+                    <>
+                      <Play size={16} />
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Start</span>
+                    </>
                   )}
                 </div>
-
-                {/* Action button */}
-                <div className="shrink-0">
-                  {!audit && isAuditor && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleStart(branch.branch_id, branch.branch_name) }}
-                      disabled={starting === branch.branch_id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 hover:bg-amber-400 text-gray-900 transition-colors disabled:opacity-50"
-                    >
-                      <Play size={12} />
-                      Start
-                    </button>
-                  )}
-
-                  {canContinue && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); navigate(`/audits/${audit.id}`) }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
-                    >
-                      <RotateCcw size={12} />
-                      Continue
-                    </button>
-                  )}
-
-                  {(audit && !isLocked) && (
-                    <ChevronRight size={18} className="text-gray-600 mt-0.5" />
-                  )}
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      <ConfirmModal
-        open={!!confirmStart}
-        onClose={() => setConfirmStart(null)}
-        onConfirm={confirmStartAudit}
-        title="Start Audit"
-        message={`Start a new audit for ${confirmStart?.branchName} for ${monthLabel}? This will claim this branch for you.`}
-        confirmLabel="Start Audit"
-      />
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

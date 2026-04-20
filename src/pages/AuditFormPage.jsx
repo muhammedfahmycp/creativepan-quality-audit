@@ -1,218 +1,225 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Camera, Trash2, Send, ChevronDown, ChevronUp, AlertTriangle, Download, CheckCircle, X } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import { ArrowLeft, Camera, Trash2, Send, CheckCircle, X, AlertTriangle, MessageSquare } from 'lucide-react'
 import api from '../utils/api'
-import Modal from '../components/ui/Modal'
-import StatusBadge from '../components/ui/StatusBadge'
 import Spinner from '../components/ui/Spinner'
-import ConfirmModal from '../components/ui/ConfirmModal'
+import StatusBadge from '../components/ui/StatusBadge'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const AUTOSAVE_MS = 800
 
-function lsKey(auditId) { return `qa_responses_${auditId}` }
-
-function getAnswer(response) {
-  if (!response) return null
-  if (!response.is_applicable) return 'na'
-  if (response.awarded_score === null || response.awarded_score === undefined) return null
-  return parseFloat(response.awarded_score) > 0 ? 'yes' : 'no'
+function answerOf(r) {
+  if (!r) return null
+  if (!r.is_applicable) return 'na'
+  if (r.awarded_score == null) return null
+  return r.awarded_score > 0 ? 'yes' : 'no'
 }
 
-// ── Point Row ────────────────────────────────────────────────────────────────
+function scoreFromAnswer(answer, max) {
+  if (answer === 'na')  return { is_applicable: false, awarded_score: null }
+  if (answer === 'yes') return { is_applicable: true,  awarded_score: max }
+  if (answer === 'no')  return { is_applicable: true,  awarded_score: 0 }
+  return { is_applicable: true, awarded_score: null }
+}
 
-function PointRow({ point, response, photos, onResponseChange, onPhotoAdd, onPhotoRemove, auditId, canEdit }) {
+function PhotoThumb({ photo, onDelete, canDelete }) {
+  const [url, setUrl] = useState(null)
+  useEffect(() => {
+    api.getPhotoUrl(photo.id).then((d) => setUrl(d.url)).catch(() => {})
+  }, [photo.id])
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: 72,
+        height: 72,
+        borderRadius: 'var(--radius-md)',
+        overflow: 'hidden',
+        background: 'var(--color-bg-hover)',
+        flexShrink: 0,
+      }}
+    >
+      {url ? (
+        <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+          <Spinner size={16} />
+        </div>
+      )}
+      {canDelete && (
+        <button
+          onClick={() => onDelete(photo.id)}
+          style={{
+            position: 'absolute',
+            top: 4,
+            right: 4,
+            width: 22,
+            height: 22,
+            borderRadius: 999,
+            background: 'rgba(0,0,0,0.6)',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          aria-label="Delete photo"
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function PointRow({ point, response, photos, editable, onAnswer, onComment, onUploadPhoto, onDeletePhoto }) {
+  const ans = answerOf(response)
+  const fileRef = useRef(null)
   const [uploading, setUploading] = useState(false)
-  const toast = useToast()
 
-  const answer = getAnswer(response)
-  const isNA = answer === 'na'
-  const comments = response?.comments ?? ''
-
-  const handleAnswer = (val) => {
-    if (val === 'yes')  onResponseChange(point.id, { is_applicable: true,  awarded_score: parseFloat(point.max_score) })
-    if (val === 'no')   onResponseChange(point.id, { is_applicable: true,  awarded_score: 0 })
-    if (val === 'na')   onResponseChange(point.id, { is_applicable: false, awarded_score: 0 })
-  }
-
-  const handlePhotoCapture = async (e) => {
+  async function handleFile(e) {
     const file = e.target.files?.[0]
+    e.target.value = '' // allow re-uploading same file
     if (!file) return
     setUploading(true)
     try {
-      const data = await api.uploadPhoto(auditId, response.id, file)
-      onPhotoAdd(response.id, data.photo)
-    } catch (err) {
-      toast.error('Photo upload failed: ' + err.message)
+      await onUploadPhoto(response.id, file)
     } finally {
       setUploading(false)
-      e.target.value = ''
     }
   }
 
-  const handleDeletePhoto = async (photoId) => {
-    try {
-      await api.deletePhoto(photoId)
-      onPhotoRemove(response.id, photoId)
-    } catch (err) {
-      toast.error(err.message)
-    }
-  }
-
-  return (
-    <div className={`border rounded-xl p-4 transition-all ${isNA ? 'border-gray-800 opacity-40' : 'border-gray-700 bg-gray-900/50'}`}>
-      {/* Description + max score */}
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <p className={`text-sm flex-1 leading-relaxed ${isNA ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
-          {point.description}
-        </p>
-        <span className="text-xs text-gray-500 shrink-0">{point.max_score} pts</span>
-      </div>
-
-      {/* Yes / No / N/A buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => canEdit && handleAnswer('yes')}
-          disabled={!canEdit}
-          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors border ${
-            answer === 'yes'
-              ? 'bg-green-600 border-green-500 text-white'
-              : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-green-700 hover:text-green-400'
-          } disabled:cursor-default`}
-        >
-          Yes
-        </button>
-        <button
-          onClick={() => canEdit && handleAnswer('no')}
-          disabled={!canEdit}
-          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors border ${
-            answer === 'no'
-              ? 'bg-red-700 border-red-600 text-white'
-              : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-red-700 hover:text-red-400'
-          } disabled:cursor-default`}
-        >
-          No
-        </button>
-        <button
-          onClick={() => canEdit && handleAnswer('na')}
-          disabled={!canEdit}
-          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors border ${
-            answer === 'na'
-              ? 'bg-gray-600 border-gray-500 text-white'
-              : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300'
-          } disabled:cursor-default`}
-        >
-          N/A
-        </button>
-      </div>
-
-      {/* Step 2: score + comment + photo — only after Yes or No */}
-      {(answer === 'yes' || answer === 'no') && (
-        <>
-          <p className={`mt-2 text-xs font-medium ${answer === 'yes' ? 'text-green-400' : 'text-red-400'}`}>
-            {answer === 'yes' ? `+${point.max_score} pts` : '0 pts'}
-          </p>
-
-          <textarea
-            value={comments}
-            onChange={e => onResponseChange(point.id, { comments: e.target.value })}
-            disabled={!canEdit}
-            placeholder="Comments (optional)"
-            rows={2}
-            className="mt-3 w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-amber-500 resize-none disabled:opacity-50"
-          />
-
-          <div className="mt-3 flex flex-wrap gap-2 items-start">
-            {photos.map(photo => (
-              <div key={photo.id} className="relative group">
-                <img
-                  src={photo.signed_url}
-                  alt="violation"
-                  className="w-20 h-20 object-cover rounded-lg border border-gray-700"
-                />
-                {canEdit && (
-                  <button
-                    onClick={() => handleDeletePhoto(photo.id)}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
-                  >
-                    <X size={10} />
-                  </button>
-                )}
-              </div>
-            ))}
-
-            {canEdit && (
-              <label className={`w-20 h-20 rounded-lg border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-gray-500 hover:border-amber-500 hover:text-amber-400 active:scale-95 transition-all cursor-pointer ${uploading ? 'opacity-40 pointer-events-none' : ''}`}>
-                {uploading ? <Spinner size={5} /> : <Camera size={22} />}
-                {!uploading && <span className="text-xs mt-1">Photo</span>}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={handlePhotoCapture}
-                  disabled={uploading}
-                />
-              </label>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-// ── Section Panel ─────────────────────────────────────────────────────────────
-
-function SectionPanel({ section, responses, photos, onResponseChange, onPhotoAdd, onPhotoRemove, auditId, canEdit }) {
-  const [open, setOpen] = useState(true)
-  const sectionPoints = section.qa_form_points || []
-
-  const applicable = sectionPoints.filter(p => responses[p.id]?.is_applicable !== false)
-  const totalMax = applicable.reduce((s, p) => s + parseFloat(p.max_score || 0), 0)
-  const totalAwarded = applicable.reduce((s, p) => s + (parseFloat(responses[p.id]?.awarded_score) || 0), 0)
-  const answered = sectionPoints.filter(p => getAnswer(responses[p.id]) !== null).length
-  const pct = totalMax > 0 ? Math.round((totalAwarded / totalMax) * 100) : 0
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+  const btn = (value, label, color) => {
+    const active = ans === value
+    return (
       <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left"
+        key={value}
+        onClick={() => editable && onAnswer(point.id, value)}
+        disabled={!editable}
+        style={{
+          flex: 1,
+          padding: '10px 8px',
+          fontSize: 13,
+          fontWeight: 600,
+          color: active ? '#FFFFFF' : color,
+          background: active ? color : 'var(--color-bg-card)',
+          border: `1px solid ${active ? color : 'var(--color-border)'}`,
+          borderRadius: 'var(--radius-md)',
+          transition: 'all 0.12s',
+          cursor: editable ? 'pointer' : 'not-allowed',
+          opacity: editable ? 1 : 0.7,
+        }}
       >
-        <div>
-          <h3 className="font-semibold text-white text-sm">{section.title}</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {answered}/{sectionPoints.length} answered · {totalAwarded}/{totalMax} pts ({pct}%)
-          </p>
-        </div>
-        {open ? <ChevronUp size={16} className="text-gray-500" /> : <ChevronDown size={16} className="text-gray-500" />}
+        {label}
       </button>
+    )
+  }
 
-      {open && (
-        <div className="px-3 pb-3 flex flex-col gap-3">
-          {sectionPoints.map(point => (
-            <PointRow
-              key={point.id}
-              point={point}
-              response={responses[point.id]}
-              photos={photos[responses[point.id]?.id] || []}
-              onResponseChange={onResponseChange}
-              onPhotoAdd={onPhotoAdd}
-              onPhotoRemove={onPhotoRemove}
-              auditId={auditId}
-              canEdit={canEdit}
-            />
-          ))}
+  return (
+    <div
+      style={{
+        padding: '14px 14px',
+        borderBottom: '1px solid var(--color-border-light)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ fontSize: 14, color: 'var(--color-text)', lineHeight: 1.5, flex: 1 }}>
+          {point.description}
+        </div>
+        <div
+          className="font-mono"
+          style={{ fontSize: 12, color: 'var(--color-text-muted)', flexShrink: 0, paddingTop: 2 }}
+        >
+          {point.max_score} pt
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        {btn('yes', 'Yes', 'var(--color-success)')}
+        {btn('no',  'No',  'var(--color-danger)')}
+        {btn('na',  'N/A', 'var(--color-text-muted)')}
+      </div>
+
+      {editable && (
+        <textarea
+          value={response?.comments || ''}
+          onChange={(e) => onComment(point.id, e.target.value)}
+          placeholder="Comment (optional)"
+          rows={2}
+          style={{
+            width: '100%',
+            marginTop: 10,
+            padding: '8px 10px',
+            fontSize: 13,
+            color: 'var(--color-text)',
+            background: 'var(--color-bg-elevated)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            resize: 'vertical',
+          }}
+        />
+      )}
+      {!editable && response?.comments && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: '8px 10px',
+            fontSize: 13,
+            color: 'var(--color-text-secondary)',
+            background: 'var(--color-bg-elevated)',
+            borderRadius: 'var(--radius-md)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {response.comments}
         </div>
       )}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
+        {photos.map((p) => (
+          <PhotoThumb key={p.id} photo={p} onDelete={onDeletePhoto} canDelete={editable} />
+        ))}
+        {editable && (
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleFile}
+              style={{ display: 'none' }}
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              style={{
+                width: 72,
+                height: 72,
+                border: '1px dashed var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+                color: 'var(--color-text-muted)',
+                background: 'var(--color-bg-card)',
+                cursor: 'pointer',
+              }}
+            >
+              {uploading ? <Spinner size={18} /> : (
+                <>
+                  <Camera size={20} />
+                  <span style={{ fontSize: 11 }}>Photo</span>
+                </>
+              )}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
-const SAVE_DEBOUNCE_MS = 1200
 
 export default function AuditFormPage() {
   const { auditId } = useParams()
@@ -221,421 +228,510 @@ export default function AuditFormPage() {
   const toast = useToast()
 
   const [audit, setAudit] = useState(null)
-  const [sections, setSections] = useState([])
-  const [responses, setResponses] = useState({})
-  const [photos, setPhotos] = useState({})
+  const [responses, setResponses] = useState([])
+  const [photos, setPhotos] = useState([])
+  const [form, setForm] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [saveState, setSaveState] = useState('saved')
-  const [showDelete, setShowDelete] = useState(false)
-  const [showSubmit, setShowSubmit] = useState(false)
-  const [actionLoading, setActionLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [expandedSection, setExpandedSection] = useState(null)
+  const [showReject, setShowReject] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
 
-  const dirtyRef = useRef({})
-  const responsesRef = useRef({})
-  const saveTimerRef = useRef(null)
+  const pendingSave = useRef(new Map())   // point_id -> response patch
+  const saveTimer = useRef(null)
 
-  // Keep responsesRef in sync for use in beforeunload
-  useEffect(() => { responsesRef.current = responses }, [responses])
-
-  const loadAudit = useCallback(async (mergeLocal = false) => {
-    const data = await api.getAudit(auditId)
-    const a = data.audit
-    setAudit(a)
-    setSections(a.sections || [])
-
-    const rMap = {}
-    const pMap = {}
-    for (const s of a.sections || []) {
-      for (const p of s.qa_form_points || []) {
-        if (p.response) {
-          rMap[p.id] = p.response
-          pMap[p.response.id] = p.photos || []
-        }
-      }
-    }
-
-    if (mergeLocal) {
-      // Merge localStorage over server data (handles back/reload mid-edit)
-      try {
-        const saved = localStorage.getItem(lsKey(auditId))
-        if (saved) {
-          const local = JSON.parse(saved)
-          for (const [pointId, changes] of Object.entries(local)) {
-            if (rMap[pointId]) rMap[pointId] = { ...rMap[pointId], ...changes }
-          }
-          dirtyRef.current = local
-          setSaveState('dirty')
-        }
-      } catch {}
-    }
-
-    setResponses(rMap)
-    setPhotos(pMap)
-  }, [auditId])
-
-  useEffect(() => {
-    loadAudit(true)
-      .catch(e => toast.error(e.message))
-      .finally(() => setLoading(false))
-  }, [auditId])
-
-  // Save dirty responses to localStorage on every change (synchronous — survives reload/back)
-  const persistLocal = useCallback((dirty) => {
-    try {
-      if (Object.keys(dirty).length > 0) {
-        localStorage.setItem(lsKey(auditId), JSON.stringify(dirty))
-      }
-    } catch {}
-  }, [auditId])
-
-  const flushSave = useCallback(async (dirty) => {
-    if (Object.keys(dirty).length === 0) return
-    setSaveState('saving')
-    try {
-      const payload = Object.entries(dirty).map(([pointId, changes]) => ({
-        point_id: pointId,
-        ...changes,
-      }))
-      const result = await api.saveAudit(auditId, payload)
-      dirtyRef.current = {}
-      localStorage.removeItem(lsKey(auditId))
-      setSaveState('saved')
-      // Inject server-assigned IDs into local response state
-      // (needed when a point had no pre-created response and was just upserted)
-      if (result?.responses?.length) {
-        setResponses(prev => {
-          const updated = { ...prev }
-          for (const r of result.responses) {
-            if (updated[r.point_id] && !updated[r.point_id].id) {
-              updated[r.point_id] = { ...updated[r.point_id], id: r.id }
-            }
-          }
-          return updated
-        })
-      }
-    } catch (err) {
-      setSaveState('dirty')
-      toast.error('Autosave failed — changes kept locally')
-    }
-  }, [auditId])
-
-  // beforeunload: persist to localStorage synchronously
-  useEffect(() => {
-    const handler = () => persistLocal(dirtyRef.current)
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [persistLocal])
-
-  // Flush on unmount (React navigation via back button)
-  useEffect(() => {
-    return () => {
-      clearTimeout(saveTimerRef.current)
-      persistLocal(dirtyRef.current)
-      if (Object.keys(dirtyRef.current).length > 0) {
-        api.saveAudit(auditId, Object.entries(dirtyRef.current).map(([pointId, changes]) => ({
-          point_id: pointId, ...changes
-        }))).then(() => localStorage.removeItem(lsKey(auditId))).catch(() => {})
-      }
-    }
-  }, [auditId, persistLocal])
-
-  const canEdit = audit && ['in_progress', 'edit_requested'].includes(audit.status) &&
-    (audit.auditor_id === user?.id || isQualityManager)
-
-  const handleResponseChange = useCallback((pointId, changes) => {
-    setResponses(prev => ({ ...prev, [pointId]: { ...prev[pointId], ...changes } }))
-
-    dirtyRef.current[pointId] = {
-      ...(dirtyRef.current[pointId] || {}),
-      ...changes,
-    }
-
-    setSaveState('dirty')
-    persistLocal(dirtyRef.current)
-    clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => flushSave({ ...dirtyRef.current }), SAVE_DEBOUNCE_MS)
-  }, [flushSave, persistLocal])
-
-  const handlePhotoAdd = (responseId, photo) => {
-    setPhotos(prev => ({ ...prev, [responseId]: [...(prev[responseId] || []), photo] }))
-  }
-  const handlePhotoRemove = (responseId, photoId) => {
-    setPhotos(prev => ({ ...prev, [responseId]: (prev[responseId] || []).filter(p => p.id !== photoId) }))
-  }
-
-  const handleDelete = async () => {
-    setActionLoading(true)
-    try {
-      await api.deleteAudit(auditId)
-      localStorage.removeItem(lsKey(auditId))
-      toast.success('Audit deleted')
-      navigate(-2)
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setActionLoading(false)
-      setShowDelete(false)
-    }
-  }
-
-  const handleSubmit = async () => {
-    setActionLoading(true)
-    clearTimeout(saveTimerRef.current)
-    await flushSave({ ...dirtyRef.current })
-    try {
-      await api.submitAudit(auditId)
-      localStorage.removeItem(lsKey(auditId))
-      dirtyRef.current = {}
-      // Reload full audit from server so scores + responses reflect actual DB state
-      await loadAudit(false)
-      toast.success('Audit submitted for review')
-      setShowSubmit(false)
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleApprove = async () => {
-    setActionLoading(true)
-    try {
-      await api.approveAudit(auditId)
-      await loadAudit(false)
-      toast.success('Audit approved and pushed to KPI system')
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleExportPdf = async () => {
-    try {
-      const blob = await api.exportPdf(auditId)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `audit-${audit?.branches?.name}-${audit?.month}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (err) {
-      toast.error(err.message)
-    }
-  }
-
-  if (loading) return <div className="flex justify-center pt-20"><Spinner /></div>
-  if (!audit) return <div className="text-center text-gray-500 pt-20">Audit not found</div>
-
-  const pct = audit.score_percentage
-
-  // Count answered points for progress
-  const allPoints = sections.flatMap(s => s.qa_form_points || [])
-  const answeredCount = allPoints.filter(p => getAnswer(responses[p.id]) !== null).length
-
-  return (
-    <div className="max-w-2xl mx-auto pb-36 md:pb-24">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-gray-950 border-b border-gray-800 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => navigate(-1)} className="text-gray-400 hover:text-white shrink-0">
-              <ArrowLeft size={20} />
-            </button>
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold text-white truncate">{audit.branches?.name}</h1>
-              <p className="text-xs text-gray-500">{audit.month}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <StatusBadge status={audit.status} />
-            {canEdit && (
-              <span className={`text-xs ${
-                saveState === 'saved' ? 'text-green-500' :
-                saveState === 'saving' ? 'text-amber-400' : 'text-gray-500'
-              }`}>
-                {saveState === 'saving' ? 'Saving...' : saveState === 'dirty' ? '●' : '✓'}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        {canEdit && allPoints.length > 0 && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-            <span>{answeredCount}/{allPoints.length} answered</span>
-            <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 rounded-full transition-all"
-                style={{ width: `${(answeredCount / allPoints.length) * 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Score bar — after submit/approve */}
-        {pct != null && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
-            <span>Score: {audit.total_awarded_score}/{audit.total_max_score} pts</span>
-            <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-              <div className="h-full bg-amber-400 rounded-full" style={{ width: `${pct}%` }} />
-            </div>
-            <span className="text-amber-400 font-medium">{pct}%</span>
-          </div>
-        )}
-      </div>
-
-      {/* Edit requested banner */}
-      {audit.status === 'edit_requested' && (
-        <div className="mx-4 mt-4 p-4 bg-orange-900/30 border border-orange-700 rounded-xl">
-          <div className="flex items-center gap-2 text-orange-400 font-medium text-sm mb-1">
-            <AlertTriangle size={16} />
-            Edit Requested by Quality Manager
-          </div>
-          <p className="text-sm text-orange-200">{audit.manager_comments}</p>
-        </div>
-      )}
-
-      {/* Sections */}
-      <div className="p-4 flex flex-col gap-4">
-        {sections.map(section => (
-          <SectionPanel
-            key={section.id}
-            section={section}
-            responses={responses}
-            photos={photos}
-            onResponseChange={handleResponseChange}
-            onPhotoAdd={handlePhotoAdd}
-            onPhotoRemove={handlePhotoRemove}
-            auditId={auditId}
-            canEdit={canEdit}
-          />
-        ))}
-      </div>
-
-      {/* Action bar — sits ABOVE bottom nav on mobile (bottom-16), normal on desktop */}
-      <div className="fixed bottom-16 md:bottom-0 left-0 right-0 z-30 bg-gray-950/95 backdrop-blur border-t border-gray-800 px-4 py-3 flex gap-3">
-        {canEdit && audit.auditor_id === user?.id && (
-          <>
-            <button
-              onClick={() => setShowDelete(true)}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-red-800 text-red-400 hover:bg-red-900/20 text-sm font-medium transition-colors shrink-0"
-            >
-              <Trash2 size={16} />
-              <span className="hidden sm:inline">Delete</span>
-            </button>
-            <button
-              onClick={() => setShowSubmit(true)}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-900 text-sm font-semibold transition-colors"
-            >
-              <Send size={16} />
-              Submit for Review
-            </button>
-          </>
-        )}
-
-        {isQualityManager && audit.status === 'submitted' && (
-          <>
-            <RequestEditButton auditId={auditId} onDone={setAudit} />
-            <button
-              onClick={handleApprove}
-              disabled={actionLoading}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-colors disabled:opacity-50"
-            >
-              <CheckCircle size={16} />
-              {actionLoading ? 'Approving...' : 'Approve'}
-            </button>
-          </>
-        )}
-
-        {['submitted', 'approved'].includes(audit.status) && (
-          <button
-            onClick={handleExportPdf}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-700 text-gray-300 hover:bg-gray-800 text-sm font-medium transition-colors"
-          >
-            <Download size={16} />
-            PDF
-          </button>
-        )}
-      </div>
-
-      <ConfirmModal
-        open={showDelete}
-        onClose={() => setShowDelete(false)}
-        onConfirm={handleDelete}
-        loading={actionLoading}
-        title="Delete Audit"
-        message={`Delete this audit for ${audit.branches?.name}? This cannot be undone and all photos will be permanently removed.`}
-        confirmLabel="Delete Audit"
-        danger
-      />
-      <ConfirmModal
-        open={showSubmit}
-        onClose={() => setShowSubmit(false)}
-        onConfirm={handleSubmit}
-        loading={actionLoading}
-        title="Submit for Review"
-        message="Submit this audit for the quality manager to review? You won't be able to edit it after submission unless edits are requested."
-        confirmLabel="Submit"
-      />
-    </div>
-  )
-}
-
-// ── Request Edit ──────────────────────────────────────────────────────────────
-
-function RequestEditButton({ auditId, onDone }) {
-  const [open, setOpen] = useState(false)
-  const [comments, setComments] = useState('')
-  const [loading, setLoading] = useState(false)
-  const toast = useToast()
-
-  const handleSubmit = async () => {
-    if (!comments.trim()) { toast.error('Please describe what needs to be fixed'); return }
+  const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.requestEdit(auditId, comments)
-      onDone(data.audit)
-      toast.success('Edit requested')
-      setOpen(false)
-      setComments('')
+      const resp = await api.getAudit(auditId)
+      setAudit(resp.audit)
+      setResponses(resp.responses)
+      setPhotos(resp.photos)
+      const formResp = await api.getBrandForm(resp.audit.brand_id)
+      setForm(formResp)
+      if (formResp?.sections?.length) setExpandedSection(formResp.sections[0].id)
     } catch (err) {
       toast.error(err.message)
     } finally {
       setLoading(false)
     }
+  }, [auditId, toast])
+
+  useEffect(() => { load() }, [load])
+
+  const responseByPoint = useMemo(() => {
+    const m = new Map()
+    for (const r of responses) m.set(r.point_id, r)
+    return m
+  }, [responses])
+
+  const photosByResponse = useMemo(() => {
+    const m = new Map()
+    for (const p of photos) {
+      if (!m.has(p.response_id)) m.set(p.response_id, [])
+      m.get(p.response_id).push(p)
+    }
+    return m
+  }, [photos])
+
+  const isMine = audit && audit.auditor_id === user?.id
+  const editable = audit && isMine && ['in_progress', 'edits_requested'].includes(audit.status)
+
+  const { answered, total, percent } = useMemo(() => {
+    const applicable = responses.filter((r) => r.is_applicable)
+    const answered = responses.filter((r) => !r.is_applicable || r.awarded_score != null).length
+    const maxScore = applicable.reduce((s, r) => s + (r.max_score_snapshot || 0), 0)
+    const awarded = applicable.reduce((s, r) => s + (r.awarded_score || 0), 0)
+    const percent = maxScore > 0 ? (awarded / maxScore) * 100 : 0
+    return { answered, total: responses.length, percent }
+  }, [responses])
+
+  function scheduleSave() {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(flushSave, AUTOSAVE_MS)
   }
 
+  async function flushSave() {
+    if (pendingSave.current.size === 0) return
+    const payload = Array.from(pendingSave.current.values())
+    pendingSave.current.clear()
+    try {
+      await api.saveAudit(auditId, payload)
+    } catch (err) {
+      toast.error(`Autosave failed: ${err.message}`)
+    }
+  }
+
+  function patchResponse(pointId, patch) {
+    setResponses((rs) => rs.map((r) => (r.point_id === pointId ? { ...r, ...patch } : r)))
+    const existing = pendingSave.current.get(pointId) || { point_id: pointId }
+    pendingSave.current.set(pointId, { ...existing, ...patch })
+    scheduleSave()
+  }
+
+  function handleAnswer(pointId, answer) {
+    const r = responseByPoint.get(pointId)
+    if (!r) return
+    const patch = scoreFromAnswer(answer, r.max_score_snapshot)
+    patchResponse(pointId, patch)
+  }
+
+  function handleComment(pointId, comments) {
+    patchResponse(pointId, { comments })
+  }
+
+  async function handleUploadPhoto(responseId, file) {
+    try {
+      await flushSave()
+      const resp = await api.uploadPhoto(auditId, responseId, file)
+      setPhotos((ps) => [...ps, resp.photo])
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  async function handleDeletePhoto(photoId) {
+    try {
+      await api.deletePhoto(photoId)
+      setPhotos((ps) => ps.filter((p) => p.id !== photoId))
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  async function handleSubmit() {
+    await flushSave()
+    const unanswered = responses.filter((r) => r.is_applicable && r.awarded_score == null)
+    if (unanswered.length > 0) {
+      toast.error(`${unanswered.length} point(s) still unanswered`)
+      return
+    }
+    setSubmitting(true)
+    try {
+      const resp = await api.submitAudit(auditId)
+      setAudit(resp.audit)
+      toast.success('Submitted for review')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleApprove() {
+    setSubmitting(true)
+    try {
+      const resp = await api.approveAudit(auditId)
+      setAudit(resp.audit)
+      toast.success('Approved')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleRequestEdit() {
+    if (!rejectReason.trim()) {
+      toast.error('Please describe what needs editing')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const resp = await api.requestEdit(auditId, rejectReason.trim())
+      setAudit(resp.audit)
+      setShowReject(false)
+      setRejectReason('')
+      toast.success('Edits requested')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
+        <Spinner size={32} />
+      </div>
+    )
+  }
+  if (!audit || !form) {
+    return (
+      <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)' }}>
+        Audit not found
+      </div>
+    )
+  }
+
+  const canReview = isQualityManager && audit.status === 'submitted'
+
   return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-orange-700 text-orange-400 hover:bg-orange-900/20 text-sm font-medium transition-colors shrink-0"
-      >
-        Request Edit
-      </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Request Edit">
-        <p className="text-sm text-gray-400 mb-3">Describe what the auditor needs to fix:</p>
-        <textarea
-          value={comments}
-          onChange={e => setComments(e.target.value)}
-          rows={4}
-          placeholder="e.g. Section 2, Point 3 — please re-evaluate and add a photo."
-          className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-orange-500 resize-none mb-4"
-        />
-        <div className="flex gap-3 justify-end">
-          <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm font-medium">
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium disabled:opacity-50"
-          >
-            {loading ? 'Sending...' : 'Send Request'}
-          </button>
+    <div style={{ maxWidth: 820, margin: '0 auto', paddingBottom: 120 }}>
+      {/* Header */}
+      <div style={{ padding: '12px 16px' }}>
+        <Link
+          to={`/brands/${audit.brand_id}/${audit.month}`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            color: 'var(--color-text-muted)',
+            fontSize: 13,
+            textDecoration: 'none',
+            marginBottom: 8,
+          }}
+        >
+          <ArrowLeft size={16} /> Back
+        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700 }}>Audit · {audit.month}</h1>
+          <StatusBadge status={audit.status} />
         </div>
-      </Modal>
-    </>
+        <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 4 }}>
+          Auditor: {audit.auditor_name}
+        </div>
+      </div>
+
+      {/* Edits-requested banner */}
+      {audit.status === 'edits_requested' && audit.manager_comments && (
+        <div
+          style={{
+            margin: '0 16px 12px',
+            padding: 12,
+            background: '#FFEDD5',
+            color: '#9A3412',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            gap: 10,
+            alignItems: 'flex-start',
+            fontSize: 13,
+          }}
+        >
+          <MessageSquare size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>Manager requested edits</div>
+            <div style={{ whiteSpace: 'pre-wrap' }}>{audit.manager_comments}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Progress card */}
+      <div
+        style={{
+          margin: '0 16px 16px',
+          padding: 14,
+          background: 'var(--color-bg-card)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-sm)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>Progress</div>
+          <div className="font-mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-primary)' }}>
+            {answered}/{total}
+          </div>
+        </div>
+        <div
+          style={{
+            height: 6,
+            background: 'var(--color-bg-hover)',
+            borderRadius: 999,
+            overflow: 'hidden',
+            marginTop: 8,
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${(answered / Math.max(total, 1)) * 100}%`,
+              background: 'var(--color-primary)',
+              transition: 'width 0.2s',
+            }}
+          />
+        </div>
+        {audit.score_percentage != null && audit.status !== 'in_progress' && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 13 }}>
+            <span style={{ color: 'var(--color-text-muted)' }}>Score</span>
+            <span className="font-mono" style={{ fontWeight: 700 }}>
+              {Number(audit.score_percentage).toFixed(2)}%
+            </span>
+          </div>
+        )}
+        {audit.status === 'in_progress' && answered > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 13 }}>
+            <span style={{ color: 'var(--color-text-muted)' }}>Current</span>
+            <span className="font-mono" style={{ fontWeight: 700 }}>{percent.toFixed(1)}%</span>
+          </div>
+        )}
+      </div>
+
+      {/* Sections */}
+      <div style={{ padding: '0 16px' }}>
+        {form.sections.map((section) => {
+          const sectionResponses = section.points.map((p) => responseByPoint.get(p.id))
+          const answeredInSection = sectionResponses.filter(
+            (r) => r && (!r.is_applicable || r.awarded_score != null)
+          ).length
+          const isOpen = expandedSection === section.id
+          return (
+            <div
+              key={section.id}
+              style={{
+                marginBottom: 12,
+                background: 'var(--color-bg-card)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-lg)',
+                overflow: 'hidden',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+            >
+              <button
+                onClick={() => setExpandedSection(isOpen ? null : section.id)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: 14,
+                  background: 'transparent',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text)' }}>
+                  {section.title}
+                </div>
+                <div className="font-mono" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                  {answeredInSection}/{section.points.length}
+                </div>
+              </button>
+              {isOpen && (
+                <div>
+                  {section.points.map((point) => (
+                    <PointRow
+                      key={point.id}
+                      point={point}
+                      response={responseByPoint.get(point.id)}
+                      photos={photosByResponse.get(responseByPoint.get(point.id)?.id) || []}
+                      editable={editable}
+                      onAnswer={handleAnswer}
+                      onComment={handleComment}
+                      onUploadPhoto={handleUploadPhoto}
+                      onDeletePhoto={handleDeletePhoto}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Action bar */}
+      {(editable || canReview) && (
+        <div
+          className="safe-bottom"
+          style={{
+            position: 'fixed',
+            bottom: 56,
+            left: 0,
+            right: 0,
+            background: 'var(--color-bg-card)',
+            borderTop: '1px solid var(--color-border)',
+            padding: '10px 16px',
+            display: 'flex',
+            gap: 10,
+            zIndex: 20,
+          }}
+        >
+          {editable && (
+            <button
+              onClick={handleSubmit}
+              disabled={submitting || answered < total}
+              style={{
+                flex: 1,
+                padding: '12px 16px',
+                background:
+                  answered < total ? 'var(--color-bg-hover)' : 'var(--color-primary)',
+                color: answered < total ? 'var(--color-text-muted)' : '#FFFFFF',
+                border: 'none',
+                borderRadius: 'var(--radius-md)',
+                fontWeight: 700,
+                fontSize: 14,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                cursor: answered < total || submitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {submitting ? <Spinner size={16} color="#FFFFFF" /> : <Send size={16} />}
+              Submit for review
+            </button>
+          )}
+          {canReview && (
+            <>
+              <button
+                onClick={() => setShowReject(true)}
+                disabled={submitting}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  background: 'transparent',
+                  color: 'var(--color-danger)',
+                  border: '1px solid var(--color-danger)',
+                  borderRadius: 'var(--radius-md)',
+                  fontWeight: 700,
+                  fontSize: 14,
+                }}
+              >
+                Request edits
+              </button>
+              <button
+                onClick={handleApprove}
+                disabled={submitting}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  background: 'var(--color-success)',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: 'var(--radius-md)',
+                  fontWeight: 700,
+                  fontSize: 14,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                {submitting ? <Spinner size={16} color="#FFFFFF" /> : <CheckCircle size={16} />}
+                Approve
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Reject modal */}
+      {showReject && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(26, 29, 46, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 50,
+          }}
+          onClick={() => setShowReject(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--color-bg-card)',
+              borderRadius: 'var(--radius-xl)',
+              padding: 20,
+              width: '100%',
+              maxWidth: 420,
+              boxShadow: 'var(--shadow-lg)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <AlertTriangle size={20} color="var(--color-warning)" />
+              <h3 style={{ fontSize: 16, fontWeight: 700 }}>Request edits</h3>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 12 }}>
+              Tell the auditor what needs to change.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={4}
+              style={{
+                width: '100%',
+                padding: 10,
+                fontSize: 14,
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                resize: 'vertical',
+              }}
+              placeholder="e.g. Re-upload photo for the dairy storage point, cleaner angle."
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowReject(false)}
+                style={{
+                  padding: '10px 14px',
+                  fontSize: 14,
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRequestEdit}
+                disabled={submitting}
+                style={{
+                  padding: '10px 14px',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  background: 'var(--color-warning)',
+                  borderRadius: 'var(--radius-md)',
+                }}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
